@@ -81,3 +81,10 @@ struct PlanFragment {
 };
 
 } // namespace facebook::velox::core
+template <>
+struct fmt::formatter<facebook::velox::core::ExecutionStrategy>
+    : fmt::formatter<int> {
+  auto format(facebook::velox::core::ExecutionStrategy s, format_context& ctx) {
+    return formatter<int>::format(static_cast<int>(s), ctx);
+  }
+};
