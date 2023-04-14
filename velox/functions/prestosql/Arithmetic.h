@@ -28,6 +28,13 @@
 #include "velox/functions/Macros.h"
 #include "velox/functions/prestosql/ArithmeticImpl.h"
 
+template <>
+struct fmt::formatter<std::errc> : formatter<int> {
+  auto format(std::errc s, format_context& ctx) {
+    return formatter<int>::format(static_cast<int>(s), ctx);
+  }
+};
+
 namespace facebook::velox::functions {
 
 inline constexpr int kMinRadix = 2;

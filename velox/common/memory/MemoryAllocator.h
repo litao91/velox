@@ -387,3 +387,10 @@ class MemoryAllocator : public std::enable_shared_from_this<MemoryAllocator> {
 
 std::ostream& operator<<(std::ostream& out, const MemoryAllocator::Kind& kind);
 } // namespace facebook::velox::memory
+
+template <>
+struct fmt::formatter<facebook::velox::memory::MemoryAllocator::InjectedFailure> : formatter<int> {
+  auto format(facebook::velox::memory::MemoryAllocator::InjectedFailure s, format_context& ctx) {
+    return formatter<int>::format(static_cast<int>(s), ctx);
+  }
+};

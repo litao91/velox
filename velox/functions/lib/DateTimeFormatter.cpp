@@ -1121,8 +1121,7 @@ std::string DateTimeFormatter::format(
         case DateTimeFormatSpecifier::WEEK_OF_WEEK_YEAR:
         default:
           VELOX_UNSUPPORTED(
-              "format is not supported for specifier {}",
-              token.pattern.specifier);
+              "format is not supported for specifier")
       }
     }
   }

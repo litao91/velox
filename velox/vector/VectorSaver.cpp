@@ -98,7 +98,7 @@ Encoding readEncoding(std::istream& in) {
     case Encoding::kLazy:
       return encoding;
     default:
-      VELOX_UNSUPPORTED("Unsupported encoding: {}", encoding);
+      VELOX_UNSUPPORTED("Unsupported encoding");
   }
 }
 
