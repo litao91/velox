@@ -498,6 +498,19 @@ TEST_F(StringFunctionsTest, substrNegativeStarts) {
   EXPECT_EQ(result->valueAt(0).getString(), "");
 }
 
+TEST_F(StringFunctionsTest, substrNumericOverflow) {
+  const auto substr = [&](std::optional<std::string> str,
+                          std::optional<int32_t> start,
+                          std::optional<int32_t> length) {
+    return evaluateOnce<std::string>("substr(c0, c1, c2)", str, start, length);
+  };
+
+  EXPECT_EQ(substr("example", 4, 2147483645), "mple");
+  EXPECT_EQ(substr("example", 2147483645, 4), "");
+  EXPECT_EQ(substr("example", -4, -2147483645), "");
+  EXPECT_EQ(substr("example", -2147483645, -4), "");
+}
+
 /**
  * The test for substr operating on single buffers with two string functions
  * using a conditional
@@ -1324,13 +1337,8 @@ TEST_F(StringFunctionsTest, reverse) {
   EXPECT_EQ(expectedInvalidStr, reverse(invalidStr));
 
   // Test unicode out of the valid range.
-  std::string invalidUnicodeStr;
-  invalidUnicodeStr.resize(3);
-  // An invalid unicode within 0xD800--0xDFFF.
-  int16_t invalidUnicode = 0xeda0;
-  memcpy(invalidUnicodeStr.data(), &invalidUnicode, 2);
-  invalidUnicodeStr[2] = '\0';
-  EXPECT_THROW(reverse(invalidUnicodeStr), VeloxUserError);
+  std::string invalidIncompleteString = "\xed\xa0";
+  EXPECT_EQ(reverse(invalidIncompleteString), "\xa0\xed");
 }
 
 TEST_F(StringFunctionsTest, toUtf8) {
@@ -1371,7 +1379,7 @@ class MultiStringFunction : public exec::VectorFunction {
       const TypePtr& /* outputType */,
       exec::EvalCtx& /*context*/,
       VectorPtr& result) const override {
-    result = BaseVector::wrapInConstant(rows.size(), 0, args[0]);
+    result = BaseVector::wrapInConstant(rows.end(), 0, args[0]);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

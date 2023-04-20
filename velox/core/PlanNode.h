@@ -909,33 +909,6 @@ class GatherPartitionFunctionSpec : public PartitionFunctionSpec {
   }
 };
 
-/// TODO Remove once Prestissimo is updated.
-#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
-using PartitionFunctionFactory =
-    std::function<std::unique_ptr<PartitionFunction>(int numPartitions)>;
-
-class LegacyPartitionFunctionSpec : public PartitionFunctionSpec {
- public:
-  LegacyPartitionFunctionSpec(PartitionFunctionFactory factory)
-      : factory_{std::move(factory)} {}
-
-  std::unique_ptr<PartitionFunction> create(int numPartitions) const override {
-    return factory_(numPartitions);
-  };
-
-  std::string toString() const override {
-    return "legacy";
-  }
-
-  folly::dynamic serialize() const override {
-    VELOX_UNSUPPORTED();
-  }
-
- private:
-  const PartitionFunctionFactory factory_;
-};
-#endif
-
 /// Partitions data using specified partition function. The number of partitions
 /// is determined by the parallelism of the upstream pipeline. Can be used to
 /// gather data from multiple sources.
@@ -976,21 +949,6 @@ class LocalPartitionNode : public PlanNode {
           sources_[0]->outputType()->toString());
     }
   }
-
-  /// TODO Remove once Prestissimo is updated.
-#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
-  LocalPartitionNode(
-      const PlanNodeId& id,
-      Type type,
-      PartitionFunctionFactory partitionFunctionFactory,
-      std::vector<PlanNodePtr> sources)
-      : LocalPartitionNode(
-            id,
-            type,
-            std::make_shared<LegacyPartitionFunctionSpec>(
-                std::move(partitionFunctionFactory)),
-            std::move(sources)) {}
-#endif
 
   static std::shared_ptr<LocalPartitionNode> gather(
       const PlanNodeId& id,
@@ -1065,34 +1023,6 @@ class PartitionedOutputNode : public PlanNode {
           "Broadcast partitioning doesn't allow for partitioning keys");
     }
   }
-
-#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
-  PartitionedOutputNode(
-      const PlanNodeId& id,
-      const std::vector<TypedExprPtr>& keys,
-      int numPartitions,
-      bool broadcast,
-      bool replicateNullsAndAny,
-      PartitionFunctionFactory partitionFunctionFactory,
-      RowTypePtr outputType,
-      PlanNodePtr source)
-      : PartitionedOutputNode(
-            id,
-            keys,
-            numPartitions,
-            broadcast,
-            replicateNullsAndAny,
-            std::make_shared<LegacyPartitionFunctionSpec>(
-                std::move(partitionFunctionFactory)),
-            std::move(outputType),
-            std::move(source)) {}
-
-  PartitionFunctionFactory partitionFunctionFactory() const {
-    return [this](int numPartitions) {
-      return partitionFunctionSpec_->create(numPartitions);
-    };
-  }
-#endif
 
   static std::shared_ptr<PartitionedOutputNode> broadcast(
       const PlanNodeId& id,
@@ -1492,10 +1422,27 @@ class MergeJoinNode : public AbstractJoinNode {
   static PlanNodePtr create(const folly::dynamic& obj, void* context);
 };
 
-// Cross join.
-class CrossJoinNode : public PlanNode {
+/// Represents inner/outer nested loop joins. Translates to an
+/// exec::CrossJoinProbe and exec::CrossJoinBuild(which will later be renamed to
+/// NestedLoopJoin{Probe, Build}). A separate pipeline is produced for the build
+/// side when generating exec::Operators.
+/// Nested loop join supports both equal and non-equal joins. Expressions
+/// specified in joinCondition are evaluated on every combination of left/right
+/// tuple, to emit result.
+/// This also replaces CrossJoinNode, as cross join is equivalent to inner join
+/// on TRUE. To create a plan node for cross join, use the constructor without
+/// `joinType` and `joinCondition` parameter.
+class NestedLoopJoinNode : public PlanNode {
  public:
-  CrossJoinNode(
+  NestedLoopJoinNode(
+      const PlanNodeId& id,
+      JoinType joinType,
+      TypedExprPtr joinCondition,
+      PlanNodePtr left,
+      PlanNodePtr right,
+      RowTypePtr outputType);
+
+  NestedLoopJoinNode(
       const PlanNodeId& id,
       PlanNodePtr left,
       PlanNodePtr right,
@@ -1510,7 +1457,15 @@ class CrossJoinNode : public PlanNode {
   }
 
   std::string_view name() const override {
-    return "CrossJoin";
+    return "NestedLoopJoin";
+  }
+
+  const TypedExprPtr& joinCondition() const {
+    return joinCondition_;
+  }
+
+  JoinType joinType() const {
+    return joinType_;
   }
 
   folly::dynamic serialize() const override;
@@ -1520,9 +1475,16 @@ class CrossJoinNode : public PlanNode {
  private:
   void addDetails(std::stringstream& stream) const override;
 
+  const JoinType joinType_;
+  const TypedExprPtr joinCondition_;
   const std::vector<PlanNodePtr> sources_;
   const RowTypePtr outputType_;
 };
+
+// TODO Remove after updating Prestissimo.
+#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
+using CrossJoinNode = NestedLoopJoinNode;
+#endif
 
 // Represents the 'SortBy' node in the plan.
 class OrderByNode : public PlanNode {

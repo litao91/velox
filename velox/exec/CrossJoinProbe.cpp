@@ -21,25 +21,20 @@ namespace facebook::velox::exec {
 CrossJoinProbe::CrossJoinProbe(
     int32_t operatorId,
     DriverCtx* driverCtx,
-    const std::shared_ptr<const core::CrossJoinNode>& joinNode)
+    const std::shared_ptr<const core::NestedLoopJoinNode>& joinNode)
     : Operator(
           driverCtx,
           joinNode->outputType(),
           operatorId,
           joinNode->id(),
           "CrossJoinProbe"),
-      outputBatchSize_{driverCtx->queryConfig().preferredOutputBatchSize()} {
-  bool isIdentityProjection = true;
-
+      outputBatchSize_{outputBatchRows()} {
   auto probeType = joinNode->sources()[0]->outputType();
   for (auto i = 0; i < probeType->size(); ++i) {
     auto name = probeType->nameOf(i);
     auto outIndex = outputType_->getChildIdxIfExists(name);
     if (outIndex.has_value()) {
       identityProjections_.emplace_back(i, outIndex.value());
-      if (outIndex != i) {
-        isIdentityProjection = false;
-      }
     }
   }
 
@@ -49,10 +44,6 @@ CrossJoinProbe::CrossJoinProbe(
     if (tableChannel.has_value()) {
       buildProjections_.emplace_back(tableChannel.value(), i);
     }
-  }
-
-  if (isIdentityProjection && buildProjections_.empty()) {
-    isIdentityProjection_ = true;
   }
 }
 

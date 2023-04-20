@@ -4360,7 +4360,7 @@ TEST_F(HashJoinTest, smallOutputBatchSize) {
   // probe-side rows to load lazy vectors for.
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .planNode(std::move(plan))
-      .config(core::QueryConfig::kPreferredOutputBatchSize, std::to_string(10))
+      .config(core::QueryConfig::kPreferredOutputBatchRows, std::to_string(10))
       .referenceQuery("SELECT c0, u_c1 FROM t, u WHERE c0 = u_c0 AND c1 < u_c1")
       .injectSpill(false)
       .run();
@@ -4475,7 +4475,7 @@ TEST_F(HashJoinTest, dynamicFilterOnPartitionKey) {
   std::shared_ptr<connector::hive::HiveTableHandle> tableHandle =
       makeTableHandle();
   ColumnHandleMap assignments = {
-      {"n1_0", regularColumn("id", BIGINT())},
+      {"n1_0", regularColumn("c0", BIGINT())},
       {"n1_1", partitionKey("k", BIGINT())}};
 
   core::PlanNodeId probeScanId;

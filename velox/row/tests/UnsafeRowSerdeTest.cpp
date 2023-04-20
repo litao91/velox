@@ -38,10 +38,15 @@ class UnsafeRowSerializerTests : public testing::Test,
     std::memset(buffer_, 0, kBufferSize);
   }
 
-  BufferPtr bufferPtr_ =
-      AlignedBuffer::allocate<char>(kBufferSize, pool(), true);
-  // Variable pointing to the row pointer held by the smart pointer BufferPtr.
-  char* buffer_ = bufferPtr_->asMutable<char>();
+  static size_t getSize(const VectorPtr& vector, vector_size_t index) {
+    return UnsafeRowSerializer::getSize(vector->type(), vector, index);
+  }
+
+  std::optional<size_t> serialize(
+      const VectorPtr& vector,
+      vector_size_t index) {
+    return UnsafeRowSerializer::serialize(vector, buffer_, index);
+  }
 
   template <typename T>
   std::shared_ptr<LazyVector> lazyFlatVector(
@@ -173,8 +178,12 @@ class UnsafeRowSerializerTests : public testing::Test,
         nullCount);
   }
 
- private:
   constexpr static size_t kBufferSize{1024};
+
+  BufferPtr bufferPtr_ =
+      AlignedBuffer::allocate<char>(kBufferSize, pool(), true);
+  // Variable pointing to the row pointer held by the smart pointer BufferPtr.
+  char* buffer_ = bufferPtr_->asMutable<char>();
 };
 
 TEST_F(UnsafeRowSerializerTests, fixedLengthPrimitive) {
@@ -220,14 +229,13 @@ TEST_F(UnsafeRowSerializerTests, stringsDynamic) {
        StringView("", 0),
        std::nullopt,
        StringView("INLINE", 6)});
+
   auto row = makeRowVector({stringVec});
 
   for (auto i = 0; i < row->size(); ++i) {
     auto serialized =
-        UnsafeRowDynamicSerializer::serialize(row->type(), row, buffer_, i)
-            .value_or(0);
-    auto size =
-        UnsafeRowDynamicSerializer::getSizeRow(row->type(), row.get(), i);
+        UnsafeRowSerializer::serialize(row, buffer_, i).value_or(0);
+    auto size = UnsafeRowSerializer::getSizeRow(row.get(), i);
     ASSERT_EQ(serialized, size);
   }
 
@@ -235,21 +243,21 @@ TEST_F(UnsafeRowSerializerTests, stringsDynamic) {
       UnsafeRowSerializer::serialize<VarcharType>(stringVec, buffer_, 0);
   EXPECT_TRUE(checkVariableLength(serialized0, 13, u8"Hello, World!"));
 
-  auto size = UnsafeRowDynamicSerializer::getSize(VARCHAR(), stringVec, 0);
+  auto size = getSize(stringVec, 0);
   EXPECT_EQ(size, serialized0.value_or(0));
 
   auto serialized1 =
       UnsafeRowSerializer::serialize<VarcharType>(stringVec, buffer_, 1);
   EXPECT_TRUE(checkVariableLength(serialized1, 0, u8""));
 
-  size = UnsafeRowDynamicSerializer::getSize(VARCHAR(), stringVec, 1);
+  size = getSize(stringVec, 1);
   EXPECT_EQ(size, serialized1.value_or(0));
 
   auto serialized2 =
       UnsafeRowSerializer::serialize<VarcharType>(stringVec, buffer_, 2);
   EXPECT_FALSE(serialized2.has_value());
 
-  size = UnsafeRowDynamicSerializer::getSize(VARCHAR(), stringVec, 2);
+  size = getSize(stringVec, 2);
   EXPECT_EQ(size, serialized2.value_or(0));
 
   // velox::StringView inlines string prefix, check that we can handle inlining.
@@ -257,7 +265,7 @@ TEST_F(UnsafeRowSerializerTests, stringsDynamic) {
       UnsafeRowSerializer::serialize<VarcharType>(stringVec, buffer_, 3);
   EXPECT_TRUE(checkVariableLength(serialized3, 6, u8"INLINE"));
 
-  size = UnsafeRowDynamicSerializer::getSize(VARCHAR(), stringVec, 3);
+  size = getSize(stringVec, 3);
   EXPECT_EQ(size, serialized3.value_or(0));
 }
 
@@ -351,14 +359,12 @@ TEST_F(UnsafeRowSerializerTests, arrayPrimitives) {
           arrayVector, buffer_, 0);
   EXPECT_FALSE(serialized0.has_value());
 
-  auto arraySize =
-      UnsafeRowDynamicSerializer::getSize(ARRAY(SMALLINT()), arrayVector, 0);
+  auto arraySize = getSize(arrayVector, 0);
   EXPECT_EQ(arraySize, serialized0.value_or(0));
 
   clearBuffer();
 
-  auto dynamic0 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(SMALLINT()), arrayVector, buffer_, 0);
+  auto dynamic0 = serialize(arrayVector, 0);
   EXPECT_FALSE(dynamic0.has_value());
   clearBuffer();
 
@@ -366,20 +372,18 @@ TEST_F(UnsafeRowSerializerTests, arrayPrimitives) {
   auto serialized1 =
       UnsafeRowSerializer::serializeComplexVectors<Array<SmallintType>>(
           arrayVector, buffer_, 1);
-  uint8_t expected1[4][8] = {
+  uint8_t expected1[3][8] = {
       {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x33, 0x03, 0x44, 0x14, 0x55, 0x05, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
-  EXPECT_TRUE(checkVariableLength(serialized1, 4 * 8, *expected1));
+  };
+  EXPECT_TRUE(checkVariableLength(serialized1, 3 * 8, *expected1));
   clearBuffer();
 
-  auto dynamic1 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(SMALLINT()), arrayVector, buffer_, 1);
-  EXPECT_TRUE(checkVariableLength(dynamic1, 4 * 8, *expected1));
+  auto dynamic1 = serialize(arrayVector, 1);
+  EXPECT_TRUE(checkVariableLength(dynamic1, 3 * 8, *expected1));
 
-  arraySize =
-      UnsafeRowDynamicSerializer::getSize(ARRAY(SMALLINT()), arrayVector, 1);
+  arraySize = getSize(arrayVector, 1);
   EXPECT_EQ(arraySize, dynamic1);
 
   clearBuffer();
@@ -388,24 +392,22 @@ TEST_F(UnsafeRowSerializerTests, arrayPrimitives) {
   auto serialized2 =
       UnsafeRowSerializer::serializeComplexVectors<Array<SmallintType>>(
           arrayVector, buffer_, 2);
-  uint8_t expected2[4][8] = {
+  uint8_t expected2[3][8] = {
       {0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x66, 0x16, 0x77, 0x07, 0x00, 0x00, 0x99, 0x09},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
-  EXPECT_TRUE(checkVariableLength(serialized2, 4 * 8, *expected2));
+  };
+  EXPECT_TRUE(checkVariableLength(serialized2, 3 * 8, *expected2));
   // third element (idx 2) is null
   ASSERT_TRUE(bits::isBitSet(buffer_ + 8, 2));
   clearBuffer();
 
-  auto dynamic2 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(SMALLINT()), arrayVector, buffer_, 2);
+  auto dynamic2 = serialize(arrayVector, 2);
 
-  arraySize =
-      UnsafeRowDynamicSerializer::getSize(ARRAY(SMALLINT()), arrayVector, 2);
+  arraySize = getSize(arrayVector, 2);
   EXPECT_EQ(arraySize, dynamic2);
 
-  EXPECT_TRUE(checkVariableLength(dynamic2, 4 * 8, *expected2));
+  EXPECT_TRUE(checkVariableLength(dynamic2, 3 * 8, *expected2));
   // third element (idx 2) is null
   ASSERT_TRUE(bits::isBitSet(buffer_ + 8, 2));
   clearBuffer();
@@ -447,11 +449,9 @@ TEST_F(UnsafeRowSerializerTests, arrayStringView) {
   ASSERT_TRUE(bits::isBitSet(buffer_ + 8, 3));
   clearBuffer();
 
-  auto dynamic0 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(VARCHAR()), arrayVector, buffer_, 0);
+  auto dynamic0 = serialize(arrayVector, 0);
 
-  auto arraySize =
-      UnsafeRowDynamicSerializer::getSize(ARRAY(VARCHAR()), arrayVector, 0);
+  auto arraySize = getSize(arrayVector, 0);
   EXPECT_EQ(arraySize, dynamic0);
 
   EXPECT_TRUE(checkVariableLength(dynamic0, 14 * 8, *expected0));
@@ -476,10 +476,8 @@ TEST_F(UnsafeRowSerializerTests, arrayStringView) {
   ASSERT_TRUE(bits::isBitSet(buffer_ + 8, 0));
   clearBuffer();
 
-  auto dynamic1 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(VARCHAR()), arrayVector, buffer_, 1);
-  arraySize =
-      UnsafeRowDynamicSerializer::getSize(ARRAY(VARCHAR()), arrayVector, 1);
+  auto dynamic1 = serialize(arrayVector, 1);
+  arraySize = getSize(arrayVector, 1);
   EXPECT_EQ(arraySize, dynamic1);
 
   EXPECT_TRUE(checkVariableLength(dynamic1, 5 * 8, *expected1));
@@ -491,14 +489,12 @@ TEST_F(UnsafeRowSerializerTests, arrayStringView) {
   auto serialized2 =
       UnsafeRowSerializer::serializeComplexVectors<Array<VarcharType>>(
           arrayVector, buffer_, 2);
-  arraySize =
-      UnsafeRowDynamicSerializer::getSize(ARRAY(VARCHAR()), arrayVector, 2);
+  arraySize = getSize(arrayVector, 2);
   EXPECT_EQ(arraySize, serialized2.value_or(0));
   EXPECT_FALSE(serialized2.has_value());
   clearBuffer();
 
-  auto dynamic2 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(VARCHAR()), arrayVector, buffer_, 2);
+  auto dynamic2 = serialize(arrayVector, 2);
   EXPECT_FALSE(dynamic2.has_value());
   clearBuffer();
 }
@@ -566,31 +562,36 @@ TEST_F(UnsafeRowSerializerTests, nestedArray) {
   auto serialized0 =
       UnsafeRowSerializer::serializeComplexVectors<Array<Array<TinyintType>>>(
           arrayArrayVector, buffer_, 0);
-  auto arrayType = ARRAY(ARRAY(TINYINT()));
-  auto arraySize =
-      UnsafeRowDynamicSerializer::getSize(arrayType, arrayArrayVector, 0);
+  auto arraySize = getSize(arrayArrayVector, 0);
   EXPECT_EQ(arraySize, serialized0);
 
-  uint8_t expected0[12][8] = {
+  uint8_t expected0[10][8] = {
+      // Number of elements: 2.
       {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00},
+      // Size + offset for each array element.
+      {0x18, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00},
+      // Size of the first array: 2.
       {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Array values: 1, 2.
       {0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Size of the second array: 2.
       {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Array values: 3, 4.
       {0x03, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  };
 
-  EXPECT_TRUE(checkVariableLength(serialized0, 12 * 8, *expected0));
+  EXPECT_TRUE(checkVariableLength(serialized0, 10 * 8, *expected0));
   clearBuffer();
 
-  auto dynamic0 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(ARRAY(TINYINT())), arrayArrayVector, buffer_, 0);
-  EXPECT_TRUE(checkVariableLength(dynamic0, 12 * 8, *expected0));
+  auto dynamic0 = serialize(arrayArrayVector, 0);
+  EXPECT_TRUE(checkVariableLength(dynamic0, 10 * 8, *expected0));
   clearBuffer();
 
   //   [ [5, 6, 7], null, [8] ]
@@ -598,31 +599,28 @@ TEST_F(UnsafeRowSerializerTests, nestedArray) {
       UnsafeRowSerializer::serializeComplexVectors<Array<Array<TinyintType>>>(
           arrayArrayVector, buffer_, 1);
 
-  arraySize =
-      UnsafeRowDynamicSerializer::getSize(arrayType, arrayArrayVector, 1);
+  arraySize = getSize(arrayArrayVector, 1);
   EXPECT_EQ(arraySize, serialized1);
 
-  uint8_t expected1[13][8] = {
+  uint8_t expected1[11][8] = {
       {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00},
       {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x05, 0x06, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  };
 
-  EXPECT_TRUE(checkVariableLength(serialized1, 13 * 8, *expected1));
+  EXPECT_TRUE(checkVariableLength(serialized1, 11 * 8, *expected1));
   clearBuffer();
 
-  auto dynamic1 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(ARRAY(TINYINT())), arrayArrayVector, buffer_, 1);
-  EXPECT_TRUE(checkVariableLength(dynamic1, 13 * 8, *expected1));
+  auto dynamic1 = serialize(arrayArrayVector, 1);
+  EXPECT_TRUE(checkVariableLength(dynamic1, 11 * 8, *expected1));
   clearBuffer();
 
   // [ [9, 10] ]
@@ -630,25 +628,23 @@ TEST_F(UnsafeRowSerializerTests, nestedArray) {
       UnsafeRowSerializer::serializeComplexVectors<Array<Array<TinyintType>>>(
           arrayArrayVector, buffer_, 2);
 
-  arraySize =
-      UnsafeRowDynamicSerializer::getSize(arrayType, arrayArrayVector, 2);
+  arraySize = getSize(arrayArrayVector, 2);
   EXPECT_EQ(arraySize, serialized2);
 
-  uint8_t expected2[7][8] = {
+  uint8_t expected2[6][8] = {
       {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00},
       {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x09, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  };
 
-  EXPECT_TRUE(checkVariableLength(serialized2, 7 * 8, expected2));
+  EXPECT_TRUE(checkVariableLength(serialized2, 6 * 8, expected2));
   clearBuffer();
 
-  auto dynamic2 = UnsafeRowDynamicSerializer::serialize(
-      ARRAY(ARRAY(TINYINT())), arrayArrayVector, buffer_, 2);
-  EXPECT_TRUE(checkVariableLength(dynamic2, 7 * 8, *expected2));
+  auto dynamic2 = serialize(arrayArrayVector, 2);
+  EXPECT_TRUE(checkVariableLength(dynamic2, 6 * 8, *expected2));
   clearBuffer();
 }
 
@@ -731,41 +727,55 @@ TEST_F(UnsafeRowSerializerTests, map) {
   ///  world: [null, null, null]
   ///  null: [0x33]
   /// }
-  uint8_t expected0[25][8] = {
+  uint8_t expected0[22][8] = {
+      // Size of serialized keys.
       {0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Number of keys.
       {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags for keys.
       {0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Size and offset for 3 string keys.
       {0x05, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00},
       {0x05, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // String key values: hello and world aligned to 8 bytes.
       {0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00},
       {0x57, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00},
+      // Number of values.
       {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags for values.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00},
+      // Size and offset for 3 value arrays.
+      {0x18, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00},
+      // Array values.
+      // Size of the first array: 2.
       {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags for the first array elements.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Array elements: 11, 22.
       {0x11, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Size of the second array: 3.
       {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags for the second array elements.
       {0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Array elements.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Size of the third array: 1.
       {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Null flags for the third array elements.
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+      // Array elements: 33.
       {0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  };
 
-  auto dynamic0 = UnsafeRowDynamicSerializer::serialize(
-      MAP(VARCHAR(), ARRAY(TINYINT())), mapVector, buffer_, 0);
+  auto dynamic0 = serialize(mapVector, 0);
 
-  auto mapSize = UnsafeRowDynamicSerializer::getSize(
-      MAP(VARCHAR(), ARRAY(TINYINT())), mapVector, 0);
+  auto mapSize = getSize(mapVector, 0);
   EXPECT_EQ(mapSize, dynamic0);
 
-  EXPECT_TRUE(checkVariableLength(dynamic0, 25 * 8, *expected0));
+  EXPECT_TRUE(checkVariableLength(dynamic0, 22 * 8, *expected0));
   clearBuffer();
 
   // null
@@ -774,12 +784,10 @@ TEST_F(UnsafeRowSerializerTests, map) {
   EXPECT_FALSE(serialized1.has_value());
   clearBuffer();
 
-  auto dynamic1 = UnsafeRowDynamicSerializer::serialize(
-      MAP(VARCHAR(), ARRAY(TINYINT())), mapVector, buffer_, 1);
+  auto dynamic1 = serialize(mapVector, 1);
   EXPECT_FALSE(dynamic1.has_value());
 
-  mapSize = UnsafeRowDynamicSerializer::getSize(
-      MAP(VARCHAR(), ARRAY(TINYINT())), mapVector, 1);
+  mapSize = getSize(mapVector, 1);
   EXPECT_EQ(mapSize, dynamic1.value_or(0));
 
   clearBuffer();
@@ -787,7 +795,7 @@ TEST_F(UnsafeRowSerializerTests, map) {
   /// {
   /// hello: [0x44]
   /// }
-  uint8_t expected2[12][8] = {
+  uint8_t expected2[11][8] = {
       {0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
@@ -795,18 +803,16 @@ TEST_F(UnsafeRowSerializerTests, map) {
       {0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00},
       {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x20, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00},
+      {0x18, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00},
       {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-      {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  };
 
-  auto dynamic2 = UnsafeRowDynamicSerializer::serialize(
-      MAP(VARCHAR(), ARRAY(TINYINT())), mapVector, buffer_, 2);
-  EXPECT_TRUE(checkVariableLength(dynamic2, 12 * 8, *expected2));
+  auto dynamic2 = serialize(mapVector, 2);
+  EXPECT_TRUE(checkVariableLength(dynamic2, 11 * 8, *expected2));
 
-  mapSize = UnsafeRowDynamicSerializer::getSize(
-      MAP(VARCHAR(), ARRAY(TINYINT())), mapVector, 2);
+  mapSize = getSize(mapVector, 2);
   EXPECT_EQ(mapSize, dynamic2.value_or(0));
 
   clearBuffer();
@@ -857,19 +863,14 @@ TEST_F(UnsafeRowSerializerTests, rowFixedLength) {
        TIMESTAMP()});
 
   for (auto index = 0; index < 5; index++) {
-    auto rowSize =
-        UnsafeRowDynamicSerializer::getSizeRow(rowType, rowVector.get(), index);
+    auto rowSize = UnsafeRowSerializer::getSizeRow(rowVector.get(), index);
     // In the row of fixed values the size will be the null bits plus 64bit per
     // value
     EXPECT_EQ(rowSize, 8 + 7 * 8);
-    EXPECT_EQ(
-        rowSize,
-        UnsafeRowDynamicSerializer::getSizeRow(
-            rowType, rowVector.get(), index));
+    EXPECT_EQ(rowSize, UnsafeRowSerializer::getSizeRow(rowVector.get(), index));
   }
 
-  auto bytes0 =
-      UnsafeRowDynamicSerializer::serialize(rowType, rowVector, buffer_, 0);
+  auto bytes0 = serialize(rowVector, 0);
   EXPECT_TRUE(checkVariableLength(bytes0, 8 * 8, *expected0));
   clearBuffer();
 
@@ -885,18 +886,7 @@ TEST_F(UnsafeRowSerializerTests, rowFixedLength) {
       {0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
   };
-  auto bytes1 = UnsafeRowDynamicSerializer::serialize(
-      ROW(
-          {BIGINT(),
-           INTEGER(),
-           SMALLINT(),
-           INTEGER(),
-           INTEGER(),
-           TIMESTAMP(),
-           TIMESTAMP()}),
-      rowVector,
-      buffer_,
-      1);
+  auto bytes1 = serialize(rowVector, 1);
   EXPECT_TRUE(checkVariableLength(bytes1, 8 * 8, *expected1));
   clearBuffer();
 
@@ -912,18 +902,7 @@ TEST_F(UnsafeRowSerializerTests, rowFixedLength) {
       {0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
   };
-  auto bytes2 = UnsafeRowDynamicSerializer::serialize(
-      ROW(
-          {BIGINT(),
-           INTEGER(),
-           SMALLINT(),
-           INTEGER(),
-           INTEGER(),
-           TIMESTAMP(),
-           TIMESTAMP()}),
-      rowVector,
-      buffer_,
-      2);
+  auto bytes2 = serialize(rowVector, 2);
   EXPECT_TRUE(checkVariableLength(bytes2, 8 * 8, *expected2));
   clearBuffer();
 
@@ -939,18 +918,7 @@ TEST_F(UnsafeRowSerializerTests, rowFixedLength) {
       {0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
   };
-  auto bytes3 = UnsafeRowDynamicSerializer::serialize(
-      ROW(
-          {BIGINT(),
-           INTEGER(),
-           SMALLINT(),
-           INTEGER(),
-           INTEGER(),
-           TIMESTAMP(),
-           TIMESTAMP()}),
-      rowVector,
-      buffer_,
-      3);
+  auto bytes3 = serialize(rowVector, 3);
   EXPECT_TRUE(checkVariableLength(bytes3, 8 * 8, *expected3));
   clearBuffer();
 
@@ -966,18 +934,7 @@ TEST_F(UnsafeRowSerializerTests, rowFixedLength) {
       {0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
       {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
   };
-  auto bytes4 = UnsafeRowDynamicSerializer::serialize(
-      ROW(
-          {BIGINT(),
-           INTEGER(),
-           SMALLINT(),
-           INTEGER(),
-           INTEGER(),
-           TIMESTAMP(),
-           TIMESTAMP()}),
-      rowVector,
-      buffer_,
-      4);
+  auto bytes4 = serialize(rowVector, 4);
   EXPECT_TRUE(checkVariableLength(bytes4, 8 * 8, *expected4));
 }
 
@@ -1027,11 +984,8 @@ TEST_F(UnsafeRowSerializerTests, rowVarLength) {
       {' ', '3', '0', ' ', 'c', 'h', 'a', 'r'},
       {'a', 'c', 't', 'e', 'r', 's', 0x00, 0x00},
   };
-  auto bytes0 = UnsafeRowDynamicSerializer::serialize(
-      ROW({BIGINT(), VARCHAR(), BIGINT(), VARCHAR(), VARCHAR(), VARCHAR()}),
-      rowVector,
-      buffer_,
-      0);
+
+  auto bytes0 = serialize(rowVector, 0);
   EXPECT_TRUE(checkVariableLength(bytes0, 12 * 8, *expected0));
   clearBuffer();
 
@@ -1053,11 +1007,8 @@ TEST_F(UnsafeRowSerializerTests, rowVarLength) {
       {'t', 'e', 'n', 'g', 'o', ' ', 'v', 'e'},
       {'i', 'n', 't', 'e', 0x00, 0x00, 0x00, 0x00},
   };
-  auto bytes1 = UnsafeRowDynamicSerializer::serialize(
-      ROW({BIGINT(), VARCHAR(), BIGINT(), VARCHAR(), VARCHAR(), VARCHAR()}),
-      rowVector,
-      buffer_,
-      1);
+
+  auto bytes1 = serialize(rowVector, 1);
   EXPECT_TRUE(checkVariableLength(bytes1, 13 * 8, *expected1));
 }
 
@@ -1065,15 +1016,13 @@ TEST_F(UnsafeRowSerializerTests, lazyVector) {
   VectorPtr lazyVector0 = lazyFlatVector<StringView>(
       1, [](vector_size_t i) { return StringView("Hello, World!", 13); });
 
-  auto serialized0 =
-      UnsafeRowDynamicSerializer::serialize(VARCHAR(), lazyVector0, buffer_, 0);
+  auto serialized0 = serialize(lazyVector0, 0);
   EXPECT_TRUE(checkVariableLength(serialized0, 13, u8"Hello, World!"));
 
   VectorPtr lazyVector1 = lazyFlatVector<Timestamp>(
       1, [](vector_size_t i) { return Timestamp(2, 1'000); });
 
-  auto serialized1 = UnsafeRowDynamicSerializer::serialize(
-      TIMESTAMP(), lazyVector1, buffer_, 0);
+  auto serialized1 = serialize(lazyVector1, 0);
   int64_t expected1 = 2'000'001;
   EXPECT_TRUE(checkFixedLength(serialized1, 0, &expected1));
 
@@ -1104,12 +1053,11 @@ TEST_F(UnsafeRowSerializerTests, complexNullsAndEncoding) {
        MAP(VARCHAR(), BOOLEAN())});
 
   auto nullVector = BaseVector::createNullConstant(type, 100, pool());
-  auto serialized =
-      UnsafeRowDynamicSerializer::serialize(type, nullVector, buffer_, 0);
+  auto serialized = serialize(nullVector, 0);
   EXPECT_FALSE(serialized.has_value());
 
-  auto vp = BaseVector::wrapInConstant(1, 0, nullVector);
-  serialized = UnsafeRowDynamicSerializer::serialize(type, vp, buffer_, 0);
+  VectorPtr vp = BaseVector::wrapInConstant(1, 0, nullVector);
+  serialized = serialize(vp, 0);
   EXPECT_FALSE(serialized.has_value());
 
   clearBuffer();
@@ -1118,7 +1066,7 @@ TEST_F(UnsafeRowSerializerTests, complexNullsAndEncoding) {
 class UnsafeRowBatchDeserializerTest : public ::testing::Test {
  public:
   UnsafeRowBatchDeserializerTest()
-      : pool_(memory::getDefaultMemoryPool()),
+      : pool_(memory::addDefaultLeafMemoryPool()),
         bufferPtr_(AlignedBuffer::allocate<char>(1024, pool_.get(), true)),
         buffer_(bufferPtr_->asMutable<char>()) {}
 
@@ -1334,7 +1282,7 @@ TEST_F(UnsafeRowBatchDeserializerTest, fixedWidthArray) {
   std::vector<TypePtr> rowTypes{ARRAY(TINYINT()), ARRAY(SMALLINT())};
   UnsafeRowDynamicParser rowParser = UnsafeRowDynamicParser(rowTypes, rowData);
 
-  VectorPtr val0 = UnsafeRowDynamicVectorBatchDeserializer::deserializeComplex(
+  VectorPtr val0 = UnsafeRowDeserializer::deserializeOne(
       rowParser.dataAt(0), rowParser.typeAt(0), pool_.get());
   /*
    * ArrayVector<FlatVector<int8_t>>:
@@ -1447,7 +1395,7 @@ TEST_F(UnsafeRowBatchDeserializerTest, nestedArray) {
   std::vector<TypePtr> rowTypes{ARRAY(ARRAY(ARRAY(TINYINT())))};
   UnsafeRowDynamicParser rowParser = UnsafeRowDynamicParser(rowTypes, rowData);
 
-  VectorPtr val0 = UnsafeRowDynamicVectorBatchDeserializer::deserializeComplex(
+  VectorPtr val0 = UnsafeRowDeserializer::deserializeOne(
       rowParser.dataAt(0), rowParser.typeAt(0), pool_.get());
 
   /*
@@ -1587,7 +1535,7 @@ TEST_F(UnsafeRowBatchDeserializerTest, nestedMap) {
   std::vector<TypePtr> rowTypes{MAP(SMALLINT(), MAP(SMALLINT(), SMALLINT()))};
   UnsafeRowDynamicParser rowParser = UnsafeRowDynamicParser(rowTypes, rowData);
 
-  VectorPtr val0 = UnsafeRowDynamicVectorBatchDeserializer::deserializeComplex(
+  VectorPtr val0 = UnsafeRowDeserializer::deserializeOne(
       rowParser.dataAt(0), rowParser.typeAt(0), pool_.get());
 
   /*
@@ -1695,8 +1643,8 @@ TEST_F(UnsafeRowBatchDeserializerTest, rowVector) {
   auto rowType =
       ROW({BIGINT(), VARCHAR(), BIGINT(), VARCHAR(), VARCHAR(), VARCHAR()});
 
-  VectorPtr val0 = UnsafeRowDynamicVectorBatchDeserializer::deserializeComplex(
-      rows, rowType, pool_.get());
+  VectorPtr val0 =
+      UnsafeRowDeserializer::deserialize(rows, rowType, pool_.get());
 
   auto rowVectorPtr = std::dynamic_pointer_cast<RowVector>(val0);
 
@@ -1757,8 +1705,13 @@ class UnsafeRowComplexBatchDeserializerTests : public testing::Test,
     std::vector<std::optional<std::string_view>> serializedVector;
     for (size_t i = 0; i < inputVector->size(); ++i) {
       // Serialize rowVector into bytes.
-      auto rowSize = UnsafeRowDynamicSerializer::serialize(
-          inputVector->type(), inputVector, buffers_[i], /*idx=*/i);
+      auto rowSize =
+          UnsafeRowSerializer::serialize(inputVector, buffers_[i], /*idx=*/i);
+
+      ASSERT_EQ(
+          rowSize.value_or(0),
+          UnsafeRowSerializer::getSizeRow(inputVector.get(), i));
+
       if (rowSize) {
         serializedVector.push_back(
             std::string_view(buffers_[i], rowSize.value()));
@@ -1766,9 +1719,8 @@ class UnsafeRowComplexBatchDeserializerTests : public testing::Test,
         serializedVector.push_back(std::nullopt);
       }
     }
-    VectorPtr outputVector =
-        UnsafeRowDynamicVectorBatchDeserializer::deserializeComplex(
-            serializedVector, inputVector->type(), pool());
+    VectorPtr outputVector = UnsafeRowDeserializer::deserialize(
+        serializedVector, inputVector->type(), pool());
     test::assertEqualVectors(inputVector, outputVector);
   }
 
@@ -1796,6 +1748,26 @@ TEST_F(UnsafeRowComplexBatchDeserializerTests, nullRows) {
     const auto outerRowVector = makeRowVector({innerRowVector});
     testVectorSerde(outerRowVector);
   }
+}
+
+TEST_F(UnsafeRowComplexBatchDeserializerTests, arrayOfTimestamp) {
+  auto data = makeRowVector({
+      makeArrayVector<Timestamp>({
+          {
+              Timestamp::fromMicros(1001),
+              Timestamp::fromMicros(1002),
+              Timestamp::fromMicros(1003),
+          },
+          {
+              Timestamp::fromMicros(1001),
+              Timestamp::fromMicros(1002),
+              Timestamp::fromMicros(1003),
+              Timestamp::fromMicros(1004),
+          },
+      }),
+  });
+
+  testVectorSerde(data);
 }
 
 } // namespace
