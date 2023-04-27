@@ -30,7 +30,7 @@ class MapUnionSumTest : public AggregationTestBase {};
 TEST_F(MapUnionSumTest, global) {
   auto data = makeRowVector({
       makeNullableMapVector<int64_t, int64_t>({
-          {{}}, // empty map
+          {std::vector<std::pair<int64_t, std::optional<int64_t>>>{}}, // empty map
           std::nullopt, // null map
           {{{1, 10}, {2, 20}}},
           {{{1, 11}, {3, 30}, {4, 40}}},
@@ -83,9 +83,9 @@ TEST_F(MapUnionSumTest, nullAndEmptyMaps) {
   auto emptyAndNullMaps = makeRowVector({
       makeNullableMapVector<int64_t, int64_t>({
           std::nullopt,
-          {{}},
+          {std::optional<std::vector<std::pair<int64_t, std::optional<int64_t>>>>{}},
           std::nullopt,
-          {{}},
+          {std::optional<std::vector<std::pair<int64_t, std::optional<int64_t>>>>{}},
       }),
   });
 

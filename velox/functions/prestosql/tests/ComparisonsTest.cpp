@@ -230,7 +230,7 @@ TEST_F(ComparisonsTest, eqArray) {
   test(std::nullopt, {{1}}, std::nullopt);
   test({{1}}, std::nullopt, std::nullopt);
 
-  test({{}}, {{}}, true);
+  test({std::vector<std::optional<int64_t>>{}}, {std::vector<std::optional<int64_t>>{}}, true);
 
   test({{1, 2, 3}}, {{1, 2, 3}}, true);
   test({{1, 2, 3}}, {{1, 2, 4}}, false);
@@ -242,7 +242,7 @@ TEST_F(ComparisonsTest, eqArray) {
   test({{1, std::nullopt}}, {{1, 2}}, std::nullopt);
 
   // Different size arrays.
-  test({{}}, {{std::nullopt, std::nullopt}}, false);
+  test({std::vector<std::optional<int64_t>>{}}, {{std::nullopt, std::nullopt}}, false);
   test({{1, 2}}, {{1, 2, std::nullopt}}, false);
   test(
       {{std::nullopt, std::nullopt}},
@@ -278,7 +278,7 @@ TEST_F(ComparisonsTest, eqMap) {
   // Elements checked in sorted order.
   test({{{3, 4}, {1, 2}}}, {{{1, 2}, {3, 4}}}, true);
 
-  test({{}}, {{}}, true);
+  test({std::vector<std::pair<int64_t, std::optional<int64_t>>>{}}, {{}}, true);
 
   test({{{1, 2}, {3, 5}}}, {{{1, 2}, {3, 4}}}, false);
 
@@ -370,7 +370,7 @@ TEST_F(ComparisonsTest, eqNestedComplex) {
   // Compare Row(Array<Array<int>>, int, Map<int, int>)
   using array_type = std::optional<std::vector<std::optional<int64_t>>>;
   array_type array1 = {{1, 2}};
-  array_type array2 = {{}};
+  array_type array2 = {std::vector<std::optional<int64_t>>{}};
   array_type array3 = {{1, 100, 2}};
 
   auto vector1 =

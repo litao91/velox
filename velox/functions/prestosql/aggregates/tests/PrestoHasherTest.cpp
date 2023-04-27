@@ -245,7 +245,7 @@ TEST_F(PrestoHasherTest, arrays) {
        {{10, 11}},
        {{12, std::nullopt}},
        std::nullopt,
-       {{}}});
+       {std::vector<std::optional<int64_t>>{}}});
 
   assertHash(
       baseArrayVector,
@@ -272,7 +272,7 @@ TEST_F(PrestoHasherTest, arrays) {
       {{std::nullopt}},
       {{1, 2, 3}},
       {{1024, std::nullopt, -99, -999}},
-      {{}},
+      {std::vector<std::optional<int64_t>>{}},
       {{std::nullopt, -1}},
   });
 

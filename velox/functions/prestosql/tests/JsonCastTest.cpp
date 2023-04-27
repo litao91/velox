@@ -620,7 +620,8 @@ TEST_F(JsonCastTest, fromNested) {
 
 TEST_F(JsonCastTest, unsupportedTypes) {
   // Map keys cannot be timestamp.
-  auto timestampKeyMap = makeMapVector<Timestamp, int64_t>({{}});
+  auto timestampKeyMap = makeMapVector<Timestamp, int64_t>(
+      {std::vector<std::pair<Timestamp, std::optional<int64_t>>>{}});
   VELOX_ASSERT_THROW(
       evaluateCast<JsonNativeType>(
           MAP(TIMESTAMP(), BIGINT()), JSON(), makeRowVector({timestampKeyMap})),
@@ -876,7 +877,7 @@ TEST_F(JsonCastTest, toArray) {
   auto expected = makeNullableArrayVector<StringView>(
       {{{"red"_sv, "blue"_sv}},
        {{std::nullopt, std::nullopt, "purple"_sv}},
-       {{}},
+       {std::vector<std::optional<StringView>>{}},
        std::nullopt});
 
   testCast<ComplexType>(JSON(), ARRAY(VARCHAR()), data, expected);
@@ -900,7 +901,7 @@ TEST_F(JsonCastTest, toMap) {
   auto expected = makeNullableMapVector<StringView, StringView>(
       {{{{"blue"_sv, "2.2"_sv}, {"red"_sv, "1"_sv}}},
        {{{"purple"_sv, std::nullopt}, {"yellow"_sv, "4"_sv}}},
-       {{}},
+       {std::vector<std::pair<StringView, std::optional<StringView>>>{}},
        std::nullopt});
 
   testCast<ComplexType>(JSON(), MAP(VARCHAR(), VARCHAR()), data, expected);
@@ -915,7 +916,7 @@ TEST_F(JsonCastTest, toMap) {
   expected = makeNullableMapVector<int64_t, double>(
       {{{{101, 1.1}, {102, 2.0}}},
        {{{103, std::nullopt}, {104, 4.0}}},
-       {{}},
+       {std::vector<std::pair<int64_t, std::optional<double>>>{}},
        std::nullopt});
 
   testCast<ComplexType>(JSON(), MAP(BIGINT(), DOUBLE()), data, expected);
@@ -1003,8 +1004,9 @@ TEST_F(JsonCastTest, toNested) {
   auto arrayExpected = makeNullableNestedArrayVector<StringView>(
       {{{{{"1"_sv, "2"_sv}}, {{"3"_sv}}}},
        {{{{std::nullopt, std::nullopt, "4"_sv}}}},
-       {{{{}}}},
-       {{}}});
+       {{{std::vector<std::optional<StringView>>{}}}},
+       {std::optional<std::vector<
+           std::optional<std::vector<std::optional<StringView>>>>>{}}});
 
   testCast<ComplexType>(JSON(), ARRAY(ARRAY(VARCHAR())), array, arrayExpected);
 

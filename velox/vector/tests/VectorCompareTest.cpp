@@ -82,7 +82,7 @@ TEST_F(VectorCompareTest, compareStopAtNullArray) {
   // When two arrays are of different sizes the checked elements are:
   // equalsOnly=true  -> none.
   // equalsOnly=false -> the size of the smallest.
-  test({{}}, {{std::nullopt, std::nullopt}}, kExpectNotNull);
+  test({std::vector<std::optional<int64_t>>{}}, {{std::nullopt, std::nullopt}}, kExpectNotNull);
   test({{1, 2}}, {{1, 2, std::nullopt}}, kExpectNotNull);
   test({{std::nullopt}}, {{std::nullopt, std::nullopt}}, kExpectNull);
 

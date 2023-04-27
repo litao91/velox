@@ -267,6 +267,9 @@ TEST_F(MapFilterTest, try) {
   auto result =
       evaluate<BaseVector>("try(map_filter(c0, (k, v) -> (v / k > 0)))", data);
   auto expected = makeNullableMapVector<int64_t, int64_t>(
-      {{{{1, 2}, {2, 3}}}, std::nullopt, {{{7, 8}}}, {{}}});
+      {{{{1, 2}, {2, 3}}},
+       std::nullopt,
+       {{{7, 8}}},
+       {std::vector<std::pair<int64_t, std::optional<int64_t>>>{}}});
   assertEqualVectors(expected, result);
 }
