@@ -68,7 +68,7 @@ inline std::vector<std::optional<std::vector<T>>> reverseNested(
 template <typename T>
 inline NestedVector<std::optional<T>> intInput() {
   return NestedVector<std::optional<T>>{
-      {},
+        std::vector<std::optional<T>>{},
       {std::nullopt, std::nullopt},
       {9, 8, 12},
       {5, 6, 1, std::nullopt, 0, 99, -99},
@@ -79,7 +79,7 @@ inline NestedVector<std::optional<T>> intInput() {
 template <typename T>
 inline NestedVector<std::optional<T>> intAscNullSmallest() {
   return NestedVector<std::optional<T>>{
-      {},
+        std::vector<std::optional<T>>{},
       {std::nullopt, std::nullopt},
       {8, 9, 12},
       {std::nullopt, -99, 0, 1, 5, 6, 99},
@@ -90,7 +90,7 @@ inline NestedVector<std::optional<T>> intAscNullSmallest() {
 template <typename T>
 inline NestedVector<std::optional<T>> intAscNullLargest() {
   return NestedVector<std::optional<T>>{
-      {},
+        std::vector<std::optional<T>>{},
       {std::nullopt, std::nullopt},
       {8, 9, 12},
       {-99, 0, 1, 5, 6, 99, std::nullopt},
@@ -101,7 +101,7 @@ inline NestedVector<std::optional<T>> intAscNullLargest() {
 template <typename T>
 inline NestedVector<std::optional<T>> floatingPointInput() {
   return NestedVector<std::optional<T>>{
-      {},
+        std::vector<std::optional<T>>{},
       {std::nullopt, std::nullopt},
       {1.0001, std::nullopt, 1.0, -2.0, 3.03, std::nullopt},
       {max<T>(), lowest<T>(), nan<T>(), inf<T>(), -9.9, 9.9, std::nullopt, 0.},
@@ -242,7 +242,7 @@ arrayInput() {
   using A = std::vector<std::optional<int32_t>>;
   return std::vector<std::optional<std::vector<std::optional<A>>>>{
       // Empty.
-      {{}},
+      {std::vector<std::optional<A>>{}},
       // All nulls.
       {{std::nullopt, std::nullopt}},
       // Same prefix.
@@ -259,7 +259,7 @@ inline std::vector<std::optional<
 arrayAscNullSmallest() {
   using A = std::vector<std::optional<int32_t>>;
   return std::vector<std::optional<std::vector<std::optional<A>>>>{
-      {{}},
+      {std::vector<std::optional<A>>{}},
       {{std::nullopt, std::nullopt}},
       {{A({1, 3}), A({1, 3, 5}), A({2, 1})}},
       {{std::nullopt, A({1, 3}), A({2, 1})}},
@@ -272,7 +272,7 @@ inline std::vector<std::optional<
 arrayAscNullLargest() {
   using A = std::vector<std::optional<int32_t>>;
   return std::vector<std::optional<std::vector<std::optional<A>>>>{
-      {{}},
+      {std::vector<std::optional<A>>{}},
       {{std::nullopt, std::nullopt}},
       {{A({1, 3}), A({1, 3, 5}), A({2, 1})}},
       {{A({1, 3}), A({2, 1}), std::nullopt}},
@@ -285,7 +285,7 @@ mapInput() {
   using M = std::vector<std::pair<int32_t, std::optional<int32_t>>>;
   return NestedVector<M>{
       // Empty.
-      {},
+        std::vector<M>{},
       // Sort on normalized keys.
       {M{{1, 11}, {3, 10}}, M{{2, 11}, {0, 10}}, M{{1, 11}, {1, 10}}},
       // Sort on values when keys are same.
@@ -299,7 +299,7 @@ inline NestedVector<std::vector<std::pair<int32_t, std::optional<int32_t>>>>
 mapAscNullSmallest() {
   using M = std::vector<std::pair<int32_t, std::optional<int32_t>>>;
   return NestedVector<M>{
-      {},
+        std::vector<M>{},
       {M{{2, 11}, {0, 10}}, M{{1, 11}, {1, 10}}, M{{1, 11}, {3, 10}}},
       {M{{1, 11}, {3, 10}}, M{{1, 13}, {3, 12}}},
       {M{{0, std::nullopt}}, M{{0, 10}}},
@@ -310,7 +310,7 @@ inline NestedVector<std::vector<std::pair<int32_t, std::optional<int32_t>>>>
 mapAscNullLargest() {
   using M = std::vector<std::pair<int32_t, std::optional<int32_t>>>;
   return NestedVector<M>{
-      {},
+        std::vector<M>{},
       {M{{2, 11}, {0, 10}}, M{{1, 11}, {1, 10}}, M{{1, 11}, {3, 10}}},
       {M{{1, 11}, {3, 10}}, M{{1, 13}, {3, 12}}},
       {M{{0, 10}}, M{{0, std::nullopt}}},
@@ -322,7 +322,7 @@ inline NestedVector<variant> rowInput() {
   variant nullInt = variant(TypeKind::INTEGER);
   return NestedVector<variant>{
       // Empty.
-      {},
+        std::vector<variant>{},
       // All nulls.
       {nullRow, nullRow},
       // Null row.
@@ -336,7 +336,7 @@ inline NestedVector<variant> rowAscNullSmallest() {
   variant nullRow = variant(TypeKind::ROW);
   variant nullInt = variant(TypeKind::INTEGER);
   return NestedVector<variant>{
-      {},
+        std::vector<variant>{},
       {nullRow, nullRow},
       {nullRow, variant::row({1, "blue"}), variant::row({2, "red"})},
       {variant::row({nullInt, "red"}), variant::row({1, "green"})},
@@ -347,7 +347,7 @@ inline NestedVector<variant> rowAscNullLargest() {
   variant nullRow = variant(TypeKind::ROW);
   variant nullInt = variant(TypeKind::INTEGER);
   return NestedVector<variant>{
-      {},
+        std::vector<variant>{},
       {nullRow, nullRow},
       {variant::row({1, "blue"}), variant::row({2, "red"}), nullRow},
       {variant::row({1, "green"}), variant::row({nullInt, "red"})},

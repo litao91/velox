@@ -71,7 +71,7 @@ class ArrayIntersectTest : public FunctionBaseTest {
     auto expected = makeNullableArrayVector<T>({
         {{1, -2, 4}},
         {{1, -2}},
-        {{}},
+        {std::vector<std::optional<T>>{}},
         std::nullopt,
         {{1, -2, 4}},
     });
@@ -87,7 +87,7 @@ class ArrayIntersectTest : public FunctionBaseTest {
         {8, 1, 8, 1},
     });
     expected = makeNullableArrayVector<T>({
-        {{}},
+        {std::vector<std::optional<T>>{}},
         {{2, -2}},
         {std::vector<std::optional<T>>{std::nullopt}},
         std::nullopt,

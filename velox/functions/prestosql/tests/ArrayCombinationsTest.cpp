@@ -42,7 +42,7 @@ class ArrayCombinationsTest : public FunctionBaseTest {
         {{{{std::vector<std::optional<T>>()}}},
          {{{{0, 1, 2}}, {{0, 1, 3}}, {{0, 2, 3}}, {{1, 2, 3}}}},
          {{{{0, 1, 2, 3}}}},
-         {{}}});
+         {std::vector<std::optional<std::vector<std::optional<T>>>>{}}});
     testExpr(
         expected, "combinations(C0, C1)", {arrayVector, comboLengthVector});
   }
@@ -68,7 +68,7 @@ class ArrayCombinationsTest : public FunctionBaseTest {
         {{
             {{0, 1, std::nullopt, 3}},
         }},
-        {{}},
+        {std::vector<std::optional<std::vector<std::optional<T>>>>{}},
     });
     testExpr(
         expected, "combinations(C0, C1)", {arrayVector, comboLengthVector});
@@ -145,7 +145,7 @@ TEST_F(ArrayCombinationsTest, inlineVarcharArrays) {
          {{"bb", "aa", "aa", "ddd"}},
          {{"bb", "cc", "aa", "ddd"}},
          {{"aa", "cc", "aa", "ddd"}}}},
-       {{}}});
+       {std::vector<std::optional<std::vector<std::optional<S>>>>{}}});
   testExpr(expected, "combinations(C0, C1)", {arrayVector, comboLengthVector});
 }
 
@@ -192,7 +192,7 @@ TEST_F(ArrayCombinationsTest, varcharArrays) {
            "yellow rose flowers",
            "red shiny car ahead",
            "purple is an elegant color"}}}},
-       {{}}});
+       {std::vector<std::optional<std::vector<std::optional<S>>>>{}}});
   testExpr(expected, "combinations(C0, C1)", {arrayVector, comboLengthVector});
 }
 
@@ -215,7 +215,7 @@ TEST_F(ArrayCombinationsTest, boolNullableArrays) {
          {{false, true, true, true}},
          {{false, false, true, true}},
          {{true, false, true, true}}}},
-       {{}}});
+       {std::vector<std::optional<std::vector<std::optional<bool>>>>{}}});
   testExpr(expected, "combinations(C0, C1)", {arrayVector, comboLengthVector});
 }
 
@@ -238,6 +238,6 @@ TEST_F(ArrayCombinationsTest, boolArrays) {
          {{false, true, true, true}},
          {{false, false, true, true}},
          {{true, false, true, true}}}},
-       {{}}});
+       {std::vector<std::optional<std::vector<std::optional<bool>>>>{}}});
   testExpr(expected, "combinations(C0, C1)", {arrayVector, comboLengthVector});
 }
