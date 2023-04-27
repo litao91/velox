@@ -660,7 +660,8 @@ TEST_F(JsonCastTest, unsupportedTypes) {
       "Map keys cannot be null.");
 
   // Map keys cannot be complex type.
-  auto arrayKeyVector = makeNullableArrayVector<int64_t>({{1}, {2}});
+  auto arrayKeyVector = makeNullableArrayVector<int64_t>(
+      std::vector<std::vector<std::optional<int64_t>>>{{1}, {2}});
   auto arrayKeyMap = std::make_shared<MapVector>(
       pool(),
       MAP(ARRAY(BIGINT()), BIGINT()),

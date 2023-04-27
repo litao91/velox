@@ -278,7 +278,7 @@ TEST_F(ComparisonsTest, eqMap) {
   // Elements checked in sorted order.
   test({{{3, 4}, {1, 2}}}, {{{1, 2}, {3, 4}}}, true);
 
-  test({std::vector<std::pair<int64_t, std::optional<int64_t>>>{}}, {{}}, true);
+  test({std::vector<std::pair<int64_t, std::optional<int64_t>>>{}}, {map_t::value_type{}}, true);
 
   test({{{1, 2}, {3, 5}}}, {{{1, 2}, {3, 4}}}, false);
 
