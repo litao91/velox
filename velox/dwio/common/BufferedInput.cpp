@@ -36,7 +36,7 @@ void BufferedInput::load(const LogType logType) {
   // sorting the regions from low to high
   std::sort(regions_.begin(), regions_.end());
 
-  if (UNLIKELY(FLAGS_wsVRLoad)) {
+  if (wsVRLoad_) {
     std::vector<void*> buffers;
     std::vector<Region> regions;
     uint64_t sizeToRead = 0;
@@ -109,7 +109,7 @@ bool BufferedInput::tryMerge(Region& first, const Region& second) {
   int64_t gap = second.offset - first.offset - first.length;
 
   // compare with 0 since it's comparison in different types
-  if (gap < 0 || gap <= kMaxMergeDistance) {
+  if (gap < 0 || gap <= maxMergeDistance_) {
     // ensure try merge will handle duplicate regions (extension==0)
     int64_t extension = gap + second.length;
 
