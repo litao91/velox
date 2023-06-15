@@ -371,7 +371,7 @@ std::vector<MaterializedRow> materialize(
         row.push_back(rowVariantAt(dataChunk->GetValue(j, i), type));
       } else if (type->isDecimal()) {
         row.push_back(duckdb::decimalVariant(dataChunk->GetValue(j, i)));
-      } else if (isIntervalDayTimeType(type)) {
+      } else if (type->isIntervalDayTime()) {
         auto value = variant(::duckdb::Interval::GetMicro(
             dataChunk->GetValue(j, i).GetValue<::duckdb::interval_t>()));
         row.push_back(value);
@@ -457,10 +457,6 @@ variant variantAt(const VectorPtr& vector, vector_size_t row) {
 
   if (typeKind == TypeKind::MAP) {
     return mapVariantAt(vector, row);
-  }
-
-  if (typeKind == TypeKind::HUGEINT) {
-    return variantAt<TypeKind::HUGEINT>(vector, row);
   }
 
   return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(variantAt, typeKind, vector, row);
@@ -827,7 +823,7 @@ void DuckDbQueryRunner::createTable(
           appender.Append(duckValueAt<TypeKind::BIGINT>(columnVector, row));
         } else if (rowType.childAt(column)->isLongDecimal()) {
           appender.Append(duckValueAt<TypeKind::HUGEINT>(columnVector, row));
-        } else if (isIntervalDayTimeType(type)) {
+        } else if (type->isIntervalDayTime()) {
           auto value = ::duckdb::Value::INTERVAL(
               0, 0, columnVector->as<SimpleVector<int64_t>>()->valueAt(row));
           appender.Append(value);
@@ -1196,7 +1192,8 @@ void assertResultsOrdered(
 
 std::pair<std::unique_ptr<TaskCursor>, std::vector<RowVectorPtr>> readCursor(
     const CursorParameters& params,
-    std::function<void(exec::Task*)> addSplits) {
+    std::function<void(exec::Task*)> addSplits,
+    uint64_t maxWaitMicros) {
   auto cursor = std::make_unique<TaskCursor>(params);
   // 'result' borrows memory from cursor so the life cycle must be shorter.
   std::vector<RowVectorPtr> result;
@@ -1208,7 +1205,7 @@ std::pair<std::unique_ptr<TaskCursor>, std::vector<RowVectorPtr>> readCursor(
     addSplits(task);
   }
 
-  EXPECT_TRUE(waitForTaskCompletion(task)) << task->taskId();
+  EXPECT_TRUE(waitForTaskCompletion(task, maxWaitMicros)) << task->taskId();
   return {std::move(cursor), std::move(result)};
 }
 
@@ -1235,6 +1232,10 @@ bool waitForTaskAborted(exec::Task* task, uint64_t maxWaitMicros) {
   return waitForTaskFinish(task, TaskState::kAborted, maxWaitMicros);
 }
 
+bool waitForTaskCancelled(exec::Task* task, uint64_t maxWaitMicros) {
+  return waitForTaskFinish(task, TaskState::kCanceled, maxWaitMicros);
+}
+
 bool waitForTaskStateChange(
     exec::Task* task,
     TaskState state,
@@ -1242,7 +1243,7 @@ bool waitForTaskStateChange(
   // Wait for task to transition to finished state.
   if (task->state() != state) {
     auto& executor = folly::QueuedImmediateExecutor::instance();
-    auto future = task->stateChangeFuture(maxWaitMicros).via(&executor);
+    auto future = task->taskCompletionFuture(maxWaitMicros).via(&executor);
     future.wait();
   }
 

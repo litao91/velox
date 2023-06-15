@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "velox/dwio/common/DataBuffer.h"
+#include "velox/common/memory/AllocationPool.h"
 #include "velox/dwio/common/SeekableInputStream.h"
 #include "velox/dwio/common/StreamIdentifier.h"
 
@@ -35,24 +35,26 @@ class BufferedInput {
       const MetricsLogPtr& metricsLog = MetricsLog::voidLog(),
       IoStatistics* FOLLY_NULLABLE stats = nullptr,
       uint64_t maxMergeDistance = kMaxMergeDistance,
-      bool wsVRLoad = FLAGS_wsVRLoad)
+      std::optional<bool> wsVRLoad = std::nullopt)
       : input_{std::make_shared<ReadFileInputStream>(
             std::move(readFile),
             metricsLog,
             stats)},
         pool_{pool},
         maxMergeDistance_{maxMergeDistance},
-        wsVRLoad_{wsVRLoad} {}
+        wsVRLoad_{wsVRLoad},
+        allocPool_{std::make_unique<AllocationPool>(&pool)} {}
 
   BufferedInput(
       std::shared_ptr<ReadFileInputStream> input,
       memory::MemoryPool& pool,
       uint64_t maxMergeDistance = kMaxMergeDistance,
-      bool wsVRLoad = FLAGS_wsVRLoad)
+      std::optional<bool> wsVRLoad = std::nullopt)
       : input_(std::move(input)),
         pool_(pool),
         maxMergeDistance_{maxMergeDistance},
-        wsVRLoad_{wsVRLoad} {}
+        wsVRLoad_{wsVRLoad},
+        allocPool_{std::make_unique<AllocationPool>(&pool)} {}
 
   BufferedInput(BufferedInput&&) = default;
   virtual ~BufferedInput() = default;
@@ -143,32 +145,49 @@ class BufferedInput {
 
  private:
   uint64_t maxMergeDistance_;
-  bool wsVRLoad_;
-  std::vector<uint64_t> offsets_;
-  std::vector<DataBuffer<char>> buffers_;
+  std::optional<bool> wsVRLoad_;
+  std::unique_ptr<AllocationPool> allocPool_;
+
+  // Regions enqueued for reading
   std::vector<Region> regions_;
+
+  // Offsets in the file to which the corresponding Region belongs
+  std::vector<uint64_t> offsets_;
+
+  // Buffers allocated for reading each Region.
+  std::vector<folly::Range<char*>> buffers_;
+
+  // Maps the position in which the Region was originally enqueued to the
+  // position that it went to after sorting and merging. Thus this maps from the
+  // enqueued position to its corresponding buffer offset.
+  std::vector<size_t> enqueuedToBufferOffset_;
 
   std::unique_ptr<SeekableInputStream> readBuffer(
       uint64_t offset,
       uint64_t length) const;
   std::tuple<const char*, uint64_t> readInternal(
       uint64_t offset,
-      uint64_t length) const;
+      uint64_t length,
+      std::optional<size_t> i = std::nullopt) const;
 
   void readRegion(
       const Region& region,
       const LogType logType,
       std::function<void(void* FOLLY_NONNULL, uint64_t, uint64_t, LogType)>
           action) {
+    // Save the file offset and the buffer to which we'll read it
     offsets_.push_back(region.offset);
-    DataBuffer<char> buffer(pool_, region.length);
+    buffers_.emplace_back(
+        allocPool_->allocateFixed(region.length), region.length);
 
     // action is required
     DWIO_ENSURE_NOT_NULL(action);
-    action(buffer.data(), region.length, region.offset, logType);
-
-    buffers_.push_back(std::move(buffer));
+    action(buffers_.back().data(), region.length, region.offset, logType);
   }
+
+  bool useVRead() const;
+  void sortRegions();
+  void mergeRegions();
 
   // we either load data parallelly or sequentially according to flag
   void loadWithAction(

@@ -15,7 +15,10 @@
  */
 #pragma once
 
-#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
-// TODO(spershin): Remove when migrate presto_cpp to the new header.
-#include "velox/core/Config.h"
-#endif // VELOX_ENABLE_BACKWARD_COMPATIBILITY
+#include <string>
+
+namespace facebook::velox::functions::window {
+void registerBigintNthValue(const std::string& name);
+
+void registerIntegerNthValue(const std::string& name);
+} // namespace facebook::velox::functions::window

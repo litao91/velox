@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <string>
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/functions/Udf.h"
 #include "velox/functions/prestosql/tests/utils/FunctionBaseTest.h"
@@ -42,6 +43,14 @@ class ComparisonsTest : public functions::test::FunctionBaseTest {
       ASSERT_TRUE(!result->isNullAt(i));
       ASSERT_EQ(expected[i], result->valueAt(i));
     }
+  }
+
+  void testBetweenExpr(
+      const std::string& exprStr,
+      const std::vector<VectorPtr>& input,
+      const VectorPtr& expectedResult) {
+    auto actual = evaluate<SimpleVector<bool>>(exprStr, makeRowVector(input));
+    test::assertEqualVectors(expectedResult, actual);
   }
 };
 
@@ -130,6 +139,128 @@ TEST_F(ComparisonsTest, betweenDecimal) {
       runAndCompare("c0 between 2.00 and 3.00", longFlat, expectedResult),
       "Scalar function signature is not supported: "
       "between(DECIMAL(20,2), DECIMAL(3,2), DECIMAL(3,2)).");
+}
+
+TEST_F(ComparisonsTest, betweenDecimalNonConstantVectors) {
+  // Short decimal tests.
+
+  // Fast path when c1 vector is constant and c2 is flat.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeShortDecimalFlatVector({100, 200, 300, 400}, DECIMAL(5, 1)),
+          makeConstant((int64_t)100, 4, DECIMAL(5, 1)),
+          makeShortDecimalFlatVector({500, 200, 500, 110}, DECIMAL(5, 1)),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // Fast path when c1 vector is flat and c2 is constant.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeShortDecimalFlatVector({100, 200, 300, 400}, DECIMAL(5, 1)),
+          makeShortDecimalFlatVector({100, 100, 100, 200}, DECIMAL(5, 1)),
+          makeConstant((int64_t)300, 4, DECIMAL(5, 1)),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // Fast path when all three vectors are flat.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeShortDecimalFlatVector({100, 200, 300, 400}, DECIMAL(5, 1)),
+          makeShortDecimalFlatVector({100, 120, 130, 350}, DECIMAL(5, 1)),
+          makeShortDecimalFlatVector({150, 200, 310, 370}, DECIMAL(5, 1)),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // General case when vectors are dictionary-encoded.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          wrapInDictionary(
+              makeIndices({0, 1, 2, 3}),
+              makeShortDecimalFlatVector({100, 200, 300, 400}, DECIMAL(5, 1))),
+          wrapInDictionary(
+              makeIndices({0, 1, 2, 3}),
+              makeShortDecimalFlatVector({100, 120, 130, 350}, DECIMAL(5, 1))),
+          wrapInDictionary(
+              makeIndices({0, 1, 2, 3}),
+              makeShortDecimalFlatVector({150, 200, 310, 370}, DECIMAL(5, 1))),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // General case of short decimals with nulls.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeShortDecimalFlatVector({100, 200, 300, 400}, DECIMAL(5, 1)),
+          makeNullableShortDecimalFlatVector(
+              {100, std::nullopt, 130, 350}, DECIMAL(5, 1)),
+          makeNullableShortDecimalFlatVector(
+              {150, 200, std::nullopt, 370}, DECIMAL(5, 1)),
+      },
+      makeNullableFlatVector<bool>({true, std::nullopt, std::nullopt, false}));
+
+  // Long decimal tests.
+
+  // Fast path when c1 vector is constant and c2 is flat.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeLongDecimalFlatVector({100, 200, 300, 400}, DECIMAL(30, 1)),
+          makeConstant(HugeInt::build(0, 100), 4, DECIMAL(30, 1)),
+          makeLongDecimalFlatVector({500, 200, 500, 110}, DECIMAL(30, 1)),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // Fast path when c1 vector is flat and c2 is constant.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeLongDecimalFlatVector({100, 200, 300, 400}, DECIMAL(30, 1)),
+          makeLongDecimalFlatVector({100, 100, 100, 200}, DECIMAL(30, 1)),
+          makeConstant(HugeInt::build(0, 300), 4, DECIMAL(30, 1)),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // Fast path when all three vectors are flat.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeLongDecimalFlatVector({100, 200, 300, 400}, DECIMAL(30, 1)),
+          makeLongDecimalFlatVector({100, 120, 130, 350}, DECIMAL(30, 1)),
+          makeLongDecimalFlatVector({150, 200, 310, 370}, DECIMAL(30, 1)),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // General case when vectors are dictionary-encoded.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          wrapInDictionary(
+              makeIndices({0, 1, 2, 3}),
+              makeLongDecimalFlatVector({100, 200, 300, 400}, DECIMAL(30, 1))),
+          wrapInDictionary(
+              makeIndices({0, 1, 2, 3}),
+              makeLongDecimalFlatVector({100, 120, 130, 350}, DECIMAL(30, 1))),
+          wrapInDictionary(
+              makeIndices({0, 1, 2, 3}),
+              makeLongDecimalFlatVector({150, 200, 310, 370}, DECIMAL(30, 1))),
+      },
+      makeFlatVector<bool>({true, true, true, false}));
+
+  // General case of long decimals with nulls.
+  testBetweenExpr(
+      "c0 between c1 and c2",
+      {
+          makeLongDecimalFlatVector({100, 200, 300, 400}, DECIMAL(30, 1)),
+          makeNullableLongDecimalFlatVector(
+              {100, std::nullopt, 130, 350}, DECIMAL(30, 1)),
+          makeNullableLongDecimalFlatVector(
+              {150, 200, std::nullopt, 370}, DECIMAL(30, 1)),
+      },
+      makeNullableFlatVector<bool>({true, std::nullopt, std::nullopt, false}));
 }
 
 TEST_F(ComparisonsTest, eqNeqDecimal) {
@@ -239,22 +370,30 @@ TEST_F(ComparisonsTest, gtLtDecimal) {
   runAndCompare("c1 <= c0", longDecimalsInputs, expectedGteLte);
 };
 
-TEST_F(ComparisonsTest, eqArray) {
+TEST_F(ComparisonsTest, eqNeqArray) {
   auto test =
       [&](const std::optional<std::vector<std::optional<int64_t>>>& array1,
           const std::optional<std::vector<std::optional<int64_t>>>& array2,
           std::optional<bool> expected) {
         auto vector1 = vectorMaker_.arrayVectorNullable<int64_t>({array1});
         auto vector2 = vectorMaker_.arrayVectorNullable<int64_t>({array2});
-        auto result = evaluate<SimpleVector<bool>>(
+        auto eqResult = evaluate<SimpleVector<bool>>(
             "c0 == c1", makeRowVector({vector1, vector2}));
 
-        ASSERT_EQ(expected.has_value(), !result->isNullAt(0));
+        auto neqResult = evaluate<SimpleVector<bool>>(
+            "c0 != c1", makeRowVector({vector1, vector2}));
+
+        ASSERT_EQ(expected.has_value(), !eqResult->isNullAt(0));
+        ASSERT_EQ(expected.has_value(), !neqResult->isNullAt(0));
         if (expected.has_value()) {
-          ASSERT_EQ(expected.value(), result->valueAt(0));
+          // equals check
+          ASSERT_EQ(expected.value(), eqResult->valueAt(0));
+          // not equal check
+          ASSERT_EQ(!expected.value(), neqResult->valueAt(0));
         }
       };
 
+  // eq and neq function test
   test(std::nullopt, std::nullopt, std::nullopt);
   test(std::nullopt, {{1}}, std::nullopt);
   test({{1}}, std::nullopt, std::nullopt);
@@ -284,7 +423,7 @@ TEST_F(ComparisonsTest, eqArray) {
       std::nullopt);
 }
 
-TEST_F(ComparisonsTest, eqMap) {
+TEST_F(ComparisonsTest, eqNeqMap) {
   using map_t =
       std::optional<std::vector<std::pair<int64_t, std::optional<int64_t>>>>;
   auto test =
@@ -292,16 +431,21 @@ TEST_F(ComparisonsTest, eqMap) {
         auto vector1 = makeNullableMapVector<int64_t, int64_t>({map1});
         auto vector2 = makeNullableMapVector<int64_t, int64_t>({map2});
 
-        auto result = evaluate<SimpleVector<bool>>(
+        auto eqResult = evaluate<SimpleVector<bool>>(
             "c0 == c1", makeRowVector({vector1, vector2}));
 
-        ASSERT_EQ(expected.has_value(), !result->isNullAt(0));
+        auto neqResult = evaluate<SimpleVector<bool>>(
+            "c0 != c1", makeRowVector({vector1, vector2}));
 
+        ASSERT_EQ(expected.has_value(), !eqResult->isNullAt(0));
+        ASSERT_EQ(expected.has_value(), !neqResult->isNullAt(0));
         if (expected.has_value()) {
-          ASSERT_EQ(expected.value(), result->valueAt(0));
+          ASSERT_EQ(expected.value(), eqResult->valueAt(0));
+          ASSERT_EQ(!expected.value(), neqResult->valueAt(0));
         }
       };
 
+  // eq and neq function test
   test({{{1, 2}, {3, 4}}}, {{{1, 2}, {3, 4}}}, true);
 
   // Elements checked in sorted order.

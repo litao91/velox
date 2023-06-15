@@ -552,6 +552,8 @@ class Type : public Tree<const std::shared_ptr<const Type>>,
   bool isLongDecimal() const;
   bool isDecimal() const;
 
+  bool isIntervalDayTime() const;
+
   bool containsUnknown() const;
 
  protected:
@@ -726,16 +728,24 @@ class LongDecimalType : public DecimalType<TypeKind::HUGEINT> {
 
 TypePtr DECIMAL(uint8_t precision, uint8_t scale);
 
-FOLLY_ALWAYS_INLINE bool isShortDecimalType(const Type& type) {
-  return dynamic_cast<const ShortDecimalType*>(&type) != nullptr;
+FOLLY_ALWAYS_INLINE const ShortDecimalType& Type::asShortDecimal() const {
+  return dynamic_cast<const ShortDecimalType&>(*this);
 }
 
-FOLLY_ALWAYS_INLINE bool isLongDecimalType(const Type& type) {
-  return dynamic_cast<const LongDecimalType*>(&type) != nullptr;
+FOLLY_ALWAYS_INLINE const LongDecimalType& Type::asLongDecimal() const {
+  return dynamic_cast<const LongDecimalType&>(*this);
 }
 
-FOLLY_ALWAYS_INLINE bool isDecimalType(const Type& type) {
-  return isShortDecimalType(type) || isLongDecimalType(type);
+FOLLY_ALWAYS_INLINE bool Type::isShortDecimal() const {
+  return dynamic_cast<const ShortDecimalType*>(this) != nullptr;
+}
+
+FOLLY_ALWAYS_INLINE bool Type::isLongDecimal() const {
+  return dynamic_cast<const LongDecimalType*>(this) != nullptr;
+}
+
+FOLLY_ALWAYS_INLINE bool Type::isDecimal() const {
+  return isShortDecimal() || isLongDecimal();
 }
 
 FOLLY_ALWAYS_INLINE bool isDecimalName(const std::string& name) {
@@ -1101,14 +1111,14 @@ class IntervalDayTimeType : public BigintType {
   }
 };
 
-FOLLY_ALWAYS_INLINE bool isIntervalDayTimeType(const TypePtr& type) {
-  // Pointer comparison works since this type is a singleton.
-  return IntervalDayTimeType::get() == type;
-}
-
 FOLLY_ALWAYS_INLINE std::shared_ptr<const IntervalDayTimeType>
 INTERVAL_DAY_TIME() {
   return IntervalDayTimeType::get();
+}
+
+FOLLY_ALWAYS_INLINE bool Type::isIntervalDayTime() const {
+  // Pointer comparison works since this type is a singleton.
+  return (this == INTERVAL_DAY_TIME().get());
 }
 
 /// Used as T for SimpleVector subclasses that wrap another vector when
@@ -1215,6 +1225,10 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
         return TEMPLATE_FUNC<::facebook::velox::TypeKind::BIGINT>(            \
             __VA_ARGS__);                                                     \
       }                                                                       \
+      case ::facebook::velox::TypeKind::HUGEINT: {                            \
+        return TEMPLATE_FUNC<::facebook::velox::TypeKind::HUGEINT>(           \
+            __VA_ARGS__);                                                     \
+      }                                                                       \
       case ::facebook::velox::TypeKind::REAL: {                               \
         return TEMPLATE_FUNC<::facebook::velox::TypeKind::REAL>(__VA_ARGS__); \
       }                                                                       \
@@ -1267,6 +1281,10 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
         return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::BIGINT>(    \
             __VA_ARGS__);                                                \
       }                                                                  \
+      case ::facebook::velox::TypeKind::HUGEINT: {                       \
+        return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::HUGEINT>(   \
+            __VA_ARGS__);                                                \
+      }                                                                  \
       case ::facebook::velox::TypeKind::REAL: {                          \
         return TEMPLATE_FUNC<T, ::facebook::velox::TypeKind::REAL>(      \
             __VA_ARGS__);                                                \
@@ -1303,8 +1321,6 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
       return TEMPLATE_FUNC<::facebook::velox::TypeKind::UNKNOWN>(__VA_ARGS__); \
     } else if ((typeKind) == ::facebook::velox::TypeKind::OPAQUE) {            \
       return TEMPLATE_FUNC<::facebook::velox::TypeKind::OPAQUE>(__VA_ARGS__);  \
-    } else if ((typeKind) == ::facebook::velox::TypeKind::HUGEINT) {           \
-      return TEMPLATE_FUNC<::facebook::velox::TypeKind::HUGEINT>(__VA_ARGS__); \
     } else {                                                                   \
       return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(                               \
           TEMPLATE_FUNC, typeKind, __VA_ARGS__);                               \
@@ -1332,6 +1348,10 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
       }                                                                        \
       case ::facebook::velox::TypeKind::BIGINT: {                              \
         return PREFIX<::facebook::velox::TypeKind::BIGINT> SUFFIX(             \
+            __VA_ARGS__);                                                      \
+      }                                                                        \
+      case ::facebook::velox::TypeKind::HUGEINT: {                             \
+        return PREFIX<::facebook::velox::TypeKind::HUGEINT> SUFFIX(            \
             __VA_ARGS__);                                                      \
       }                                                                        \
       case ::facebook::velox::TypeKind::REAL: {                                \
@@ -1364,10 +1384,6 @@ std::shared_ptr<const OpaqueType> OPAQUE() {
       }                                                                        \
       case ::facebook::velox::TypeKind::ROW: {                                 \
         return PREFIX<::facebook::velox::TypeKind::ROW> SUFFIX(__VA_ARGS__);   \
-      }                                                                        \
-      case ::facebook::velox::TypeKind::HUGEINT: {                             \
-        return PREFIX<::facebook::velox::TypeKind::HUGEINT> SUFFIX(            \
-            __VA_ARGS__);                                                      \
       }                                                                        \
       default:                                                                 \
         VELOX_FAIL("not a known type kind: {}", mapTypeKindToName(typeKind));  \
@@ -1754,6 +1770,9 @@ struct SimpleTypeTrait<CustomType<T>>
   // This is different than the physical type name.
   static constexpr char* name = T::typeName;
 };
+
+template <>
+struct SimpleTypeTrait<UnknownValue> : public TypeTraits<TypeKind::UNKNOWN> {};
 
 // TODO: move cppToType testing utilities.
 template <typename T>

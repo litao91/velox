@@ -54,6 +54,27 @@ class ExprTest : public testing::Test, public VectorTestBase {
     return core::Expressions::inferTypes(untyped, rowType, execCtx_->pool());
   }
 
+  core::TypedExprPtr parseExpression(
+      const std::string& text,
+      const RowTypePtr& rowType,
+      const std::vector<TypePtr>& lambdaInputTypes) {
+    auto untyped = parse::parseExpr(text, options_);
+    return core::Expressions::inferTypes(
+        untyped, rowType, lambdaInputTypes, execCtx_->pool(), nullptr);
+  }
+
+  std::vector<core::TypedExprPtr> parseMultipleExpression(
+      const std::string& text,
+      const RowTypePtr& rowType) {
+    auto untyped = parse::parseMultipleExpressions(text, options_);
+    std::vector<core::TypedExprPtr> parsed;
+    for (auto& iExpr : untyped) {
+      parsed.push_back(
+          core::Expressions::inferTypes(iExpr, rowType, execCtx_->pool()));
+    }
+    return parsed;
+  }
+
   template <typename T = exec::ExprSet>
   std::unique_ptr<T> compileExpression(
       const std::string& expr,
@@ -75,16 +96,30 @@ class ExprTest : public testing::Test, public VectorTestBase {
         std::move(expressions), execCtx_.get());
   }
 
+  // Utility method to compile multiple expressions expected in a single sql
+  // text.
+  std::unique_ptr<exec::ExprSet> compileMultipleExprs(
+      const std::string& text,
+      const RowTypePtr& rowType) {
+    std::vector<core::TypedExprPtr> expressions =
+        parseMultipleExpression(text, rowType);
+    return std::make_unique<exec::ExprSet>(
+        std::move(expressions), execCtx_.get());
+  }
+
   std::vector<VectorPtr> evaluateMultiple(
       const std::vector<std::string>& texts,
-      const RowVectorPtr& input) {
+      const RowVectorPtr& input,
+      const std::optional<SelectivityVector>& rows = std::nullopt) {
     auto exprSet = compileMultiple(texts, asRowType(input->type()));
 
     exec::EvalCtx context(execCtx_.get(), exprSet.get(), input.get());
-
-    SelectivityVector rows(input->size());
     std::vector<VectorPtr> result(texts.size());
-    exprSet->eval(rows, context, result);
+    if (rows.has_value()) {
+      exprSet->eval(*rows, context, result);
+    } else {
+      exprSet->eval(SelectivityVector{input->size()}, context, result);
+    }
     return result;
   }
 
@@ -137,6 +172,25 @@ class ExprTest : public testing::Test, public VectorTestBase {
     std::vector<VectorPtr> result(1);
     exprSet->eval(rows, context, result);
     return result[0];
+  }
+
+  template <typename T = exec::ExprSet>
+  void evalWithEmptyRows(
+      const std::string& expr,
+      const RowVectorPtr& input,
+      VectorPtr& result,
+      const VectorPtr& expected) {
+    parse::ParseOptions options;
+    auto untyped = parse::parseExpr(expr, options);
+    auto typedExpr = core::Expressions::inferTypes(
+        untyped, asRowType(input->type()), pool());
+
+    SelectivityVector rows{input->size(), false};
+    T exprSet({typedExpr}, execCtx_.get());
+    exec::EvalCtx evalCtx(execCtx_.get(), &exprSet, input.get());
+    std::vector<VectorPtr> results{result};
+    exprSet.eval(rows, evalCtx, results);
+    assertEqualVectors(result, expected);
   }
 
   template <typename T = ComplexType>
@@ -197,19 +251,36 @@ class ExprTest : public testing::Test, public VectorTestBase {
     if (pos == std::string::npos) {
       return context;
     }
-
     return context.substr(0, pos);
   }
 
-  /// Extract input path from the 'context':
-  ///     "<expression>. Input data: <input path>."
-  std::string extractInputPath(const std::string& context) {
-    auto startPos = context.find(". Input data: ");
+  std::string extractFromErrorContext(
+      const std::string& context,
+      const char* key) {
+    auto startPos = context.find(key);
     VELOX_CHECK(startPos != std::string::npos);
-    startPos += strlen(". Input data: ");
+    startPos += strlen(key);
     auto endPos = context.find(".", startPos);
     VELOX_CHECK(endPos != std::string::npos);
     return context.substr(startPos, endPos - startPos);
+  }
+
+  /// Extract input path from the 'context':
+  ///     "<expression>. Input data: <input path>. ..."
+  std::string extractInputPath(const std::string& context) {
+    return extractFromErrorContext(context, ". Input data: ");
+  }
+
+  /// Extract expression sql's path from the 'context':
+  ///     "... <input path>. SQL expression: <sql path>"
+  std::string extractSqlPath(const std::string& context) {
+    return extractFromErrorContext(context, ". SQL expression: ");
+  }
+
+  /// Extract all expressions sqls' path from the 'context':
+  ///     "... <sql path>.  All SQL expressions: <all sql path>"
+  std::string extractAllExprSqlPath(const std::string& context) {
+    return extractFromErrorContext(context, ". All SQL expressions: ");
   }
 
   VectorPtr restoreVector(const std::string& path) {
@@ -220,15 +291,6 @@ class ExprTest : public testing::Test, public VectorTestBase {
     return copy;
   }
 
-  std::string extractSqlPath(const std::string& context) {
-    auto startPos = context.find(". SQL expression: ");
-    VELOX_CHECK(startPos != std::string::npos);
-    startPos += strlen(". SQL expression: ");
-    auto endPos = context.find(".", startPos);
-    VELOX_CHECK(endPos != std::string::npos);
-    return context.substr(startPos, endPos - startPos);
-  }
-
   void verifyDataAndSqlPaths(const VeloxException& e, const VectorPtr& data) {
     auto inputPath = extractInputPath(e.topLevelContext());
     auto copy = restoreVector(inputPath);
@@ -237,6 +299,10 @@ class ExprTest : public testing::Test, public VectorTestBase {
     auto sqlPath = extractSqlPath(e.topLevelContext());
     auto sql = readSqlFromFile(sqlPath);
     ASSERT_NO_THROW(compileExpression(sql, asRowType(data->type())));
+
+    auto allSqlsPath = extractAllExprSqlPath(e.topLevelContext());
+    auto allSqls = readSqlFromFile(allSqlsPath);
+    ASSERT_NO_THROW(compileMultipleExprs(allSqls, asRowType(data->type())));
   }
 
   std::string readSqlFromFile(const std::string& path) {
@@ -1932,9 +1998,11 @@ TEST_F(ExprTest, complexNullOutput) {
 TEST_F(ExprTest, rewriteInputs) {
   // rewrite one field
   {
+    auto alpha =
+        std::make_shared<core::FieldAccessTypedExpr>(INTEGER(), "alpha");
     auto expr = parseExpression(
         "(a + b) * 2.1", ROW({"a", "b"}, {INTEGER(), DOUBLE()}));
-    expr = expr->rewriteInputNames({{"a", "alpha"}});
+    expr = expr->rewriteInputNames({{"a", alpha}});
 
     auto expectedExpr = parseExpression(
         "(alpha + b) * 2.1", ROW({"alpha", "b"}, {INTEGER(), DOUBLE()}));
@@ -1943,13 +2011,42 @@ TEST_F(ExprTest, rewriteInputs) {
 
   // rewrite 2 fields
   {
+    auto alpha =
+        std::make_shared<core::FieldAccessTypedExpr>(INTEGER(), "alpha");
+    auto beta = std::make_shared<core::FieldAccessTypedExpr>(DOUBLE(), "beta");
     auto expr = parseExpression(
         "a + b * c", ROW({"a", "b", "c"}, {INTEGER(), DOUBLE(), DOUBLE()}));
-    expr = expr->rewriteInputNames({{"a", "alpha"}, {"b", "beta"}});
+    expr = expr->rewriteInputNames({{"a", alpha}, {"b", beta}});
 
     auto expectedExpr = parseExpression(
         "alpha + beta * c",
         ROW({"alpha", "beta", "c"}, {INTEGER(), DOUBLE(), DOUBLE()}));
+    ASSERT_EQ(*expectedExpr, *expr);
+  }
+
+  // rewrite with lambda
+  {
+    auto alpha =
+        std::make_shared<core::FieldAccessTypedExpr>(INTEGER(), "alpha");
+    auto expr =
+        parseExpression("i -> i * a", ROW({"a"}, {INTEGER()}), {INTEGER()});
+    expr = expr->rewriteInputNames({{"a", alpha}});
+
+    auto expectedExpr = parseExpression(
+        "i -> i * alpha", ROW({"alpha"}, {INTEGER()}), {INTEGER()});
+    ASSERT_EQ(*expectedExpr, *expr);
+  }
+
+  // no rewrite with dereference
+  {
+    auto alpha =
+        std::make_shared<core::FieldAccessTypedExpr>(INTEGER(), "alpha");
+    auto expr = parseExpression(
+        "i -> i * b.a", ROW({"b"}, {ROW({"a"}, {INTEGER()})}), {INTEGER()});
+    expr = expr->rewriteInputNames({{"a", alpha}});
+
+    auto expectedExpr = parseExpression(
+        "i -> i * b.a", ROW({"b"}, {ROW({"a"}, {INTEGER()})}), {INTEGER()});
     ASSERT_EQ(*expectedExpr, *expr);
   }
 }
@@ -2313,6 +2410,17 @@ TEST_F(ExprTest, exceptionContext) {
 
   try {
     evaluate("c0 + (c1 % 0)", data);
+    FAIL() << "Expected an exception";
+  } catch (const VeloxException& e) {
+    ASSERT_EQ("mod(cast((c1) as BIGINT), 0:BIGINT)", e.context());
+    ASSERT_EQ(
+        "plus(cast((c0) as BIGINT), mod(cast((c1) as BIGINT), 0:BIGINT))",
+        trimInputPath(e.topLevelContext()));
+    verifyDataAndSqlPaths(e, data);
+  }
+
+  try {
+    evaluateMultiple({"c0 + (c1 % 0)", "c0 + c1"}, data);
     FAIL() << "Expected an exception";
   } catch (const VeloxException& e) {
     ASSERT_EQ("mod(cast((c1) as BIGINT), 0:BIGINT)", e.context());
@@ -3111,6 +3219,27 @@ TEST_F(ExprTest, addNulls) {
     }
     ASSERT_TRUE(result->isNullAt(kSize - 1));
   }
+
+  // Make sure addNulls does not overwrite a shared dictionary vector indices.
+  {
+    BufferPtr sharedIndices =
+        AlignedBuffer::allocate<vector_size_t>(6, context.pool());
+    auto* mutableIndices = sharedIndices->asMutable<vector_size_t>();
+    mutableIndices[0] = 1;
+    mutableIndices[1] = 1;
+    mutableIndices[2] = 1;
+
+    // Vector of size 2 using only the first two indices of sharedIndices.
+    auto wrappedVectorSmaller = BaseVector::wrapInDictionary(
+        nullptr, sharedIndices, 2, makeFlatVector<int64_t>({1, 2, 3}));
+    exec::Expr::addNulls(
+        SelectivityVector(3),
+        rawNulls,
+        context,
+        BIGINT(),
+        wrappedVectorSmaller);
+    EXPECT_EQ(mutableIndices[2], 1);
+  }
 }
 
 namespace {
@@ -3792,5 +3921,86 @@ TEST_F(ExprTest, dictionaryResizeWithIndicesReset) {
   auto result = evaluate(
       "coalesce(plus(c0, 1::BIGINT), 1::BIGINT)", makeRowVector({wrappedC0}));
   auto expected = makeNullableFlatVector<int64_t>({2, 2, 1});
+  assertEqualVectors(expected, result);
+}
+
+TEST_F(ExprTest, noSelectedRows) {
+  VectorPtr result = makeFlatVector<int64_t>({7, 8, 9});
+  auto expected = makeFlatVector<int64_t>({7, 8, 9});
+
+  // Test evalFlatNoNulls code path.
+  {
+    auto input = makeRowVector(
+        {makeFlatVector<int64_t>({1, 2, 3}),
+         makeFlatVector<int64_t>({4, 5, 6})});
+    evalWithEmptyRows("c0 + c1", input, result, expected);
+  }
+
+  // Test regular evaluation path.
+  {
+    auto input = makeRowVector(
+        {makeNullableFlatVector<int64_t>({1, std::nullopt, 3}),
+         makeNullableFlatVector<int64_t>({std::nullopt, 5, 6})});
+    evalWithEmptyRows("c0 + c1", input, result, expected);
+  }
+
+  // Test simplified evaluation path.
+  {
+    auto input = makeRowVector(
+        {makeNullableFlatVector<int64_t>({1, std::nullopt, 3}),
+         makeNullableFlatVector<int64_t>({std::nullopt, 5, 6})});
+    evalWithEmptyRows<exec::ExprSetSimplified>(
+        "c0 + c1", input, result, expected);
+  }
+}
+
+TEST_F(ExprTest, multiplyReferencedConstantField) {
+  auto data = makeRowVector(
+      {makeFlatVector<bool>({true, false, true, false}),
+       makeConstantArray<int64_t>(4, {1, 2, 3})});
+
+  auto result = evaluate("if(c0, c1, c1)", data);
+  auto expected = makeConstantArray<int64_t>(4, {1, 2, 3});
+  assertEqualVectors(expected, result);
+}
+
+TEST_F(ExprTest, dereference) {
+  // Make a vector of Row<Row<int64_t>> where the middle-layer has dictionary
+  // over constant encoding. Evaluate nested dereference c0.d0.f0 on it so that
+  // the outer dereference expression (i.e., dereference of f0) receive
+  // dictionary-encoded input without peeling.
+  auto child = makeFlatVector<int64_t>({1, 2});
+  auto d0 = makeRowVector({"f0"}, {child});
+  auto constantD0 = BaseVector::wrapInConstant(6, 0, d0);
+  auto indices = makeIndices({0, 1, 2, 3, 4, 5});
+  auto nulls = makeNulls(6, [](auto row) { return row == 5; });
+  auto dictionaryD0 =
+      BaseVector::wrapInDictionary(nulls, indices, 6, constantD0);
+  auto c0 = makeRowVector({"d0"}, {dictionaryD0});
+  auto input = makeRowVector({"c0"}, {c0});
+
+  // Skip row 4 during evaluation. FieldReference should not have errors dealing
+  // with this situation.
+  SelectivityVector rows(input->size(), true);
+  rows.setValid(4, false);
+  rows.updateBounds();
+
+  auto results = evaluateMultiple({"(c0).d0.f0"}, input, rows);
+  BaseVector::flattenVector(results[0]);
+  auto flatResult = results[0]->asFlatVector<int64_t>();
+  EXPECT_EQ(flatResult->valueAt(0), 1);
+  EXPECT_EQ(flatResult->valueAt(1), 1);
+  EXPECT_EQ(flatResult->valueAt(2), 1);
+  EXPECT_EQ(flatResult->valueAt(3), 1);
+  EXPECT_TRUE(flatResult->isNullAt(5));
+
+  // Test dereferencing a field vector that is shorter than the struct. Evaluate
+  // nested dereference so that the outer dereference expression receives
+  // constant-encoded input.
+  auto rowType = ROW({"f0"}, {BIGINT()});
+  constantD0 = BaseVector::createNullConstant(rowType, 6, pool());
+  c0 = makeRowVector({"d0"}, {constantD0});
+  auto result = evaluate("(c0).d0.f0", makeRowVector({c0}));
+  auto expected = makeNullConstant(TypeKind::BIGINT, 6);
   assertEqualVectors(expected, result);
 }
