@@ -62,7 +62,7 @@ TEST_F(MapUnionSumTest, globalVarcharKey) {
 
   auto data = makeRowVector({
       makeNullableMapVector<StringView, int64_t>({
-          {{}}, // empty map
+          {std::nullopt}, // empty map
           std::nullopt, // null map
           {{{keys[0], 10}, {keys[1], 20}}},
           {{{keys[0], 11}, {keys[2], 30}, {keys[3], 40}}},

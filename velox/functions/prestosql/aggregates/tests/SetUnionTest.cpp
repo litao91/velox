@@ -55,7 +55,7 @@ TEST_F(SetUnionTest, global) {
   // Null inputs.
   data = makeRowVector({
       makeNullableArrayVector<int32_t>({
-          {{}},
+          {std::nullopt},
           {{1, 2, std::nullopt, 3}},
           {{1, 2}},
           std::nullopt,
@@ -136,7 +136,7 @@ TEST_F(SetUnionTest, groupBy) {
   data = makeRowVector({
       makeFlatVector<int16_t>({1, 1, 2, 2, 2, 1, 2, 1, 2, 1}),
       makeNullableArrayVector<int32_t>({
-          {{}},
+          {std::nullopt},
           {{1, 2, 3}},
           {{10, std::nullopt, 20}},
           {{20, 30, 40, std::nullopt, 50}},
@@ -144,7 +144,7 @@ TEST_F(SetUnionTest, groupBy) {
           {{4, 2, 1, 5}},
           {{60, std::nullopt, 20}},
           {{std::nullopt, 5, 6}},
-          {{}},
+          {std::nullopt},
           std::nullopt,
       }),
   });
@@ -166,7 +166,7 @@ TEST_F(SetUnionTest, groupBy) {
       makeNullableArrayVector<int32_t>({
           std::nullopt,
           std::nullopt,
-          {{}},
+          {std::nullopt},
           {{1, 2}},
           {{1, 2, 3}},
           std::nullopt,
